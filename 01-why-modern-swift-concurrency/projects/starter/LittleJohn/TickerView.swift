@@ -36,7 +36,7 @@ import SwiftUI
 struct TickerView: View {
   let selectedSymbols: [String]
   @EnvironmentObject var model: LittleJohnModel
-  @Environment(\.presentationMode) var presentationMode
+  @Environment(\.dismiss) var dismiss
   /// Description of the latest error to display to the user.
   @State var lastErrorMessage = "" {
     didSet { isDisplayingError = true }
@@ -63,12 +63,28 @@ struct TickerView: View {
       })
     }
     .alert("Error", isPresented: $isDisplayingError, actions: {
-      Button("Close", role: .cancel) { }
+      Button("Close", role: .cancel) {
+				dismiss()
+			}
     }, message: {
       Text(lastErrorMessage)
     })
     .listStyle(.plain)
     .font(.custom("FantasqueSansMono-Regular", size: 18))
     .padding(.horizontal)
+		.task {
+			do {
+				try await model.startTicker(selectedSymbols)
+			} catch {
+				DispatchQueue.main.async {
+					lastErrorMessage = error.localizedDescription
+					isDisplayingError = true
+				}
+			}
+		}.onChange(of: model.tickerSymbols.count, perform: { symbolCount in
+			if symbolCount == 0 {
+				dismiss()
+			}
+		})
   }
 }
