@@ -42,7 +42,13 @@ class SuperStorageModel: ObservableObject {
     guard let url = URL(string: "http://localhost:8080/files/download?\(file.name)") else {
       throw "Could not create the URL."
     }
-    return Data()
+		await addDownload(name: file.name)
+		let (data, response) = try await URLSession.shared.data(from: url)
+		await updateDownload(name: file.name, progress: 1.0)
+		guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+			throw "The server responded with an error."
+		}
+    return data
   }
 
   /// Downloads a file, returns its data, and updates the download progress in ``downloads``.
@@ -73,6 +79,44 @@ class SuperStorageModel: ObservableObject {
     // Add challenge code here.
     return Data()
   }
+	
+	/// Check available files
+	func availableFiles() async throws -> [DownloadFile] {
+		print("availableFiles start")
+		guard let url = URL(string: "http://localhost:8080/files/list") else {
+				throw "Could not create the URL."
+			}
+		let urlRequest = URLRequest(url: url, timeoutInterval: 3)
+		let (data, response) = try await URLSession.shared.data(for: urlRequest)
+		
+		guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+			throw "The server responded with an error."
+		}
+		
+		guard let list = try? JSONDecoder().decode([DownloadFile].self, from: data) else {
+			throw "The server response was not recognized."
+		}
+		print("availableFiles end")
+
+		return list
+	}
+	
+	/// Fetch server status
+	func status() async throws -> String {
+		print("status start")
+
+		guard let url = URL(string: "http://localhost:8080/files/status") else {
+				throw "Could not create the URL."
+			}
+		let urlRequest = URLRequest(url: url, timeoutInterval: 3)
+		let (data, response) = try await URLSession.shared.data(for: urlRequest)
+		
+		guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+			throw "The server responded with an error."
+		}
+		print("status end")
+		return String(decoding: data, as: UTF8.self)
+	}
 
   /// Flag that stops ongoing downloads.
   @MainActor var stopDownloads = false
@@ -85,12 +129,14 @@ class SuperStorageModel: ObservableObject {
 
 extension SuperStorageModel {
   /// Adds a new download.
+	@MainActor
   func addDownload(name: String) {
     let downloadInfo = DownloadInfo(id: UUID(), name: name, progress: 0.0)
     downloads.append(downloadInfo)
   }
 
   /// Updates a the progress of a given download.
+	@MainActor
   func updateDownload(name: String, progress: Double) {
     if let index = downloads.firstIndex(where: { $0.name == name }) {
       var info = downloads[index]
