@@ -37,6 +37,8 @@ class SuperStorageModel: ObservableObject {
   /// The list of currently running downloads.
   @Published var downloads: [DownloadInfo] = []
 
+	@TaskLocal static var supportsPartialDownloads = false
+
   /// Downloads a file and returns its content.
   func download(file: DownloadFile) async throws -> Data {
     guard let url = URL(string: "http://localhost:8080/files/download?\(file.name)") else {
@@ -65,7 +67,38 @@ class SuperStorageModel: ObservableObject {
       throw "Could not create the URL."
     }
     await addDownload(name: name)
-    return Data()
+		
+		let result: (downloadStream: URLSession.AsyncBytes, response: URLResponse)
+		
+		if let offset = offset {
+			let urlRequest = URLRequest(url: url, offset: offset, length: size)
+			result = try await URLSession.shared.bytes(for: urlRequest)
+			guard (result.response as? HTTPURLResponse)?.statusCode == 206 else {
+				throw "The server responded with an error"
+			}
+		} else {
+			result = try await URLSession.shared.bytes(from: url)
+			guard (result.response as? HTTPURLResponse)?.statusCode == 200 else {
+				throw "The server responded with an error"
+			}
+		}
+		var asyncDownloadIterator = result.downloadStream.makeAsyncIterator()
+		var accumulator = ByteAccumulator(name: name, size: size)
+		
+		while await !stopDownloads, !accumulator.checkCompleted() {
+			while !accumulator.isBatchCompleted, let byte = try await asyncDownloadIterator.next() {
+				accumulator.append(byte)
+			}
+			let progress = accumulator.progress
+			Task.detached(priority: .medium) {
+				await self.updateDownload(name:name, progress:progress)
+			}
+			print(accumulator.description)
+		}
+		if await stopDownloads, !Self.supportsPartialDownloads {
+			throw CancellationError()
+		}
+		return accumulator.data
   }
 
   /// Downloads a file using multiple concurrent connections, returns the final content, and updates the download progress.
