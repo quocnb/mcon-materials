@@ -42,7 +42,13 @@ struct DownloadView: View {
   /// The downloaded data.
   @State var fileData: Data?
   /// Should display a download activity indicator.
-  @State var isDownloadActive = false
+	@State var isDownloadActive = false {
+		didSet {
+			if !isDownloadActive {
+				timerTask?.cancel()
+			}
+		}
+	}
 
   @State var duration = ""
 	
@@ -104,6 +110,15 @@ struct DownloadView: View {
         },
         downloadMultipleAction: {
           // Download a file in multiple concurrent parts.
+					isDownloadActive = true
+					downloadTask = Task {
+						do {
+							fileData = try await model.multiDownloadWithProgress(file: file)
+						} catch {
+							print(error.localizedDescription)
+						}
+						isDownloadActive = false
+					}
         }
       )
       if !model.downloads.isEmpty {

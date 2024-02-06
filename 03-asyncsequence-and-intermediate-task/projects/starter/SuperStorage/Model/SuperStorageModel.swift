@@ -98,6 +98,7 @@ class SuperStorageModel: ObservableObject {
 		if await stopDownloads, !Self.supportsPartialDownloads {
 			throw CancellationError()
 		}
+		print(name)
 		return accumulator.data
   }
 
@@ -113,7 +114,21 @@ class SuperStorageModel: ObservableObject {
     let total = 4
     let parts = (0..<total).map { partInfo(index: $0, of: total) }
     // Add challenge code here.
-    return Data()
+		var result = Data()
+		let data = try await withThrowingTaskGroup(of: (Int, Data).self, returning: Data.self) { taskGroup in
+			for (index, part) in parts.enumerated() {
+				taskGroup.addTask {
+					let data = try await self.downloadWithProgress(fileName: file.name, name: part.name, size: part.size, offset: part.offset)
+					return (index, data)
+				}
+			}
+			var result = Array(repeating: Data(), count: parts.count)
+			while let (index, downloadImage) = try await taskGroup.next() {
+				result[index] = downloadImage
+			}
+			return result.reduce(Data(), +)
+		}
+		return data
   }
 
   /// Flag that stops ongoing downloads.
