@@ -72,8 +72,9 @@ struct ChatView: View {
       HStack {
         Button(action: {
           Task {
-            do {
-              try await model.shareLocation()
+						do {
+							try await model.shareLocation()
+						} catch is CancellationError {
             } catch {
               lastErrorMessage = error.localizedDescription
             }
