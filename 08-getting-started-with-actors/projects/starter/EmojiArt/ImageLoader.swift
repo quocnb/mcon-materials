@@ -1,4 +1,4 @@
-/// Copyright (c) 2021 Razeware LLC
+/// Copyright (c) 2024 Razeware LLC
 /// 
 /// Permission is hereby granted, free of charge, to any person obtaining a copy
 /// of this software and associated documentation files (the "Software"), to deal
@@ -30,60 +30,57 @@
 /// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 /// THE SOFTWARE.
 
-import Foundation
 import UIKit
 
-actor EmojiArtModel: ObservableObject {
-  @Published @MainActor private(set) var imageFeed: [ImageFile] = []
+actor ImageLoader: ObservableObject {
+	enum DownloadState {
+		case inProgress(Task<UIImage, Error>)
+		case completed(UIImage)
+		case failed
+	}
 
-	private(set) var verifiedCount = 0
+	private(set) var cache: [String: DownloadState] = [:]
 
-  nonisolated func loadImages() async throws {
-		await MainActor.run {
-			imageFeed.removeAll()
-		}
-    guard let url = URL(string: "http://localhost:8080/gallery/images") else {
-      throw "Could not create endpoint URL"
-    }
-    let (data, response) = try await URLSession.shared.data(from: url, delegate: nil)
-    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-      throw "The server responded with an error."
-    }
-    guard let list = try? JSONDecoder().decode([ImageFile].self, from: data) else {
-      throw "The server response was not recognized."
-    }
-		await MainActor.run {
-			imageFeed = list
-		}
-  }
+	/// Cache image with key
+	func add(_ image: UIImage, forKey key: String) {
+		cache[key] = .completed(image)
+	}
 
-  /// Downloads an image and returns its content.
-  nonisolated func downloadImage(_ image: ImageFile) async throws -> Data {
-    guard let url = URL(string: "http://localhost:8080\(image.url)") else {
-      throw "Could not create image URL"
-    }
-    let (data, response) = try await URLSession.shared.data(from: url, delegate: nil)
-
-    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-      throw "The server responded with an error."
-    }
-    return data
-  }
-
-	func verifyImages() async throws {
-		try await withThrowingTaskGroup(of: Void.self) { group in
-			await imageFeed.forEach { file in
-				group.addTask { [unowned self] in
-					try await Checksum.verify(file.checksum)
-					await self.increaseVerifiedCount()
-				}
+	/// Get image from server and cache
+	/// If image existed in cache, just return from cache
+	func image(_ serverPath: String) async throws -> UIImage {
+		if let cached = cache[serverPath] {
+			switch cached {
+				case .completed(let image):
+					return image
+				case .inProgress(let task):
+					return try await task.value
+				case .failed:
+					throw "Download failed"
 			}
+		}
+		let download: Task<UIImage, Error> = Task.detached {
+			guard let url = URL(string: "http://localhost:8080".appending(serverPath)) else {
+				throw "Could not create the download URL"
+			}
+			print("Download: \(url.absoluteString)")
+			let data = try await URLSession.shared.data(from: url).0
+			return try resize(data, to: CGSize(width: 200, height: 200))
+		}
+		cache[serverPath] = .inProgress(download)
 
-			try await group.waitForAll()
+		do {
+			let result = try await download.value
+			add(result, forKey: serverPath)
+			return result
+		} catch {
+			cache[serverPath] = .failed
+			throw error
 		}
 	}
 
-	private func increaseVerifiedCount() {
-		verifiedCount += 1
+	/// Reset all cache
+	func clear() {
+		cache.removeAll()
 	}
 }
