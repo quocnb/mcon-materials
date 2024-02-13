@@ -42,12 +42,20 @@ struct BottomToolbar: View {
     HStack {
       Button(action: {
         // Clear on-disk cache
+				Task {
+					await ImageDatabase.shared.clear()
+					try await model.loadImages()
+				}
       }, label: {
         Image(systemName: "folder.badge.minus")
       })
 
       Button(action: {
         // Clear in-memory cache
+				Task {
+					await ImageDatabase.shared.clearInMemoryAssets()
+					try await model.loadImages()
+				}
       }, label: {
         Image(systemName: "square.stack.3d.up.slash")
       })
@@ -58,5 +66,23 @@ struct BottomToolbar: View {
     }
     .padding(.vertical, 2)
     .padding(.horizontal, 5)
+		.task {
+			Task {
+				guard let memoryAccessSequence = ImageDatabase.shared.imageLoader.inMemoryAccess else {
+					return
+				}
+				for await count in memoryAccessSequence {
+					inMemoryAccessCount = count
+				}
+			}
+			Task {
+				guard let memoryAccessSequence2 = ImageDatabase.shared.onDiskAccess else {
+					return
+				}
+				for await count in memoryAccessSequence2 {
+					onDiskAccessCount = count
+				}
+			}
+		}
   }
 }
